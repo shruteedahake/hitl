@@ -64,3 +64,97 @@ def identify_lob_for_risk_type(file_path: str) -> dict:
 
     except Exception as e:
         return {"error": f"Error during LOB detection: {str(e)}"}
+
+
+
+
+------
+
+
+import json
+from datetime import datetime
+
+LOB_LIST = [
+    "BOILER & MACHINERY", "CYBER AND PRIVACY", "YACHT", "BUSINESS AUTO",
+    "FIDUCIARY LIABILITY", "BUSINESS OWNERS", "GARAGE AND DEALERS",
+    "COMMERCIAL GENERAL LIABILITY", "LIQUOR LIABILITY", "COMMERCIAL INLAND MARINE",
+    "MOTOR CARRIER", "COMMERCIAL PROPERTY", "TRUCKERS", "CRIME", "UMBRELLA", "OTHER"
+]
+
+def identify_lob_for_risk_type(file_path: str) -> dict:
+    try:
+        container_name, file_name = extract_container_and_file_name(file_path)
+        json_data = read_json_blob(file_name)
+
+        data_summary = json.dumps(json_data, indent=2)
+
+        detected_lob = None
+
+        # -------------------------
+        # RULE 1: selected/unselected format
+        # -------------------------
+        lob_section = json_data.get("Line Of Business")
+        if isinstance(lob_section, dict):
+            for key, value in lob_section.items():
+                if isinstance(value, str) and ":selected:" in value:
+                    detected_lob = key
+                    break
+
+        # -------------------------
+        # RULE 2: direct value inside any section
+        # -------------------------
+        if not detected_lob:
+            for section in json_data.values():
+                if isinstance(section, dict) and "Line Of Business" in section:
+                    detected_lob = section["Line Of Business"]
+                    break
+
+        # -------------------------
+        # RULE 3: fallback to LLM
+        # -------------------------
+        if not detected_lob:
+
+            prompt = f"""
+            You are an expert in insurance and business classification.
+
+            Your task is to carefully analyze the full structure and content of the following business dataset.
+
+            Available Lines of Business:
+            {', '.join(LOB_LIST)}
+
+            Business Data:
+            {data_summary}
+
+            Instructions:
+            - Choose only one Line Of Business.
+            - Respond only with the LOB name.
+            """
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            detected_lob = response.choices[0].message.content.strip()
+
+        # -------------------------
+        # OUTPUT JSON
+        # -------------------------
+        output_data = {
+            "detected_lob": detected_lob
+        }
+
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        output_blob_name = f"risk_type_checker_output_{timestamp}.json"
+
+        write_json_to_blob(output_blob_name, output_data)
+
+        output_file_path = get_blob_file_url(output_blob_name)
+
+        return {
+            "detected_lob": detected_lob,
+            "output_file": output_file_path
+        }
+
+    except Exception as e:
+        return {"error": f"Error during LOB detection: {str(e)}"}
