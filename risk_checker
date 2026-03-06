@@ -1,0 +1,66 @@
+LOB_LIST = [
+    "BOILER & MACHINERY", "CYBER AND PRIVACY", "YACHT", "BUSINESS AUTO",
+    "FIDUCIARY LIABILITY", "BUSINESS OWNERS", "GARAGE AND DEALERS",
+    "COMMERCIAL GENERAL LIABILITY", "LIQUOR LIABILITY", "COMMERCIAL INLAND MARINE",
+    "MOTOR CARRIER", "COMMERCIAL PROPERTY", "TRUCKERS", "CRIME", "UMBRELLA", "OTHER"
+]
+
+def identify_lob_for_risk_type(file_path: str) -> dict:
+    try:
+        container_name, file_name = extract_container_and_file_name(file_path)
+        json_data = read_json_blob(file_name)
+
+        data_summary = json.dumps(json_data, indent=2)
+
+        prompt = f"""
+        You are an expert in insurance and business classification.
+
+        Your task is to carefully analyze the full structure and content of the following business dataset. This includes all columns, field names, and values — not just summaries or surface-level patterns.
+
+        From the provided data, determine the **single most relevant Line of Business** from the list below. Focus on identifying the dominant business theme or coverage type reflected across the dataset.
+
+        Available Lines of Business:
+        {', '.join(LOB_LIST)}
+
+        Business Data (structured table format):
+        {data_summary}
+
+        Instructions:
+        - Look for consistent signals across the dataset that indicate the business focus or coverage type.
+        - Consider terminology, field names, values, and any patterns that align with specific insurance domains.
+        - Do not guess or infer based on vague or generic terms — only select a Line of Business if the dataset clearly supports it.
+        - If the data is ambiguous or lacks strong indicators, choose the most appropriate LOB based on the overall structure and context.
+        - Choose only one Line of Business that best represents the dataset.
+        - Respond with only the name of the selected Line of Business. Do not include explanations, reasoning, or multiple options.
+        """
+         
+        response = openai.chat.completions.create(
+        model=deployment_name,
+            messages=[
+                {"role": "system", "content": "You are an expert in insurance and business classification."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=200,
+            temperature=0.7
+        )
+
+        detected_lob = response.choices[0].message.content.strip()
+
+        output_data = {
+            "detected_lob": detected_lob
+        }
+
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        output_blob_name = f"risk_type_checker_output_{timestamp}.json"
+        
+        write_json_to_blob(output_blob_name, output_data)
+
+        output_file_path = get_blob_file_url(output_blob_name)
+    
+        return {
+            "detected_lob": detected_lob,
+            "output_file": output_file_path
+        }
+
+    except Exception as e:
+        return {"error": f"Error during LOB detection: {str(e)}"}
